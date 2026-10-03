@@ -1,7 +1,7 @@
 ﻿using Microsoft.Extensions.AI;
 using System.Numerics.Tensors;
 
-public class ProductIndex(IEmbeddingGenerator<string,Embedding<float>> generator)
+public class ProductIndex(IEmbeddingGenerator<string, Embedding<float>> generator) : IProductIndex
 {
     private readonly List<(Product Product, ReadOnlyMemory<float> Vector)> _items = [];
 

@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.AI;
 using OllamaSharp;
 using System.Numerics.Tensors;
+using Npgsql;
 
 IEmbeddingGenerator<string, Embedding<float>> generator = new OllamaApiClient(new Uri("http://localhost:11434/"), "all-minilm");
 
@@ -23,9 +24,24 @@ Product[] products =
     new(7, "Water bottle", "Insulated bottle that keeps drinks cold"),
 ];
 
+IProductIndex index;
+if (args.Contains("pg"))
+{
+    var builder = new NpgsqlDataSourceBuilder("Host=localhost;Username=postgres;Password=postgres;Database=postgres");
+    builder.UseVector();
+    var db = builder.Build();
 
+    var pgIndex = new PgProductIndex(db, generator);
+    await pgIndex.InitializeAsync();
+    index = pgIndex;
+    Console.WriteLine("\nUsing PostgreSQL with pgvector.");
+}
+else
+{
+    index = new ProductIndex(generator);
+    Console.WriteLine("\nUsing the in-memory index.");
+}
 
-var index = new ProductIndex(generator);
 Console.WriteLine($"\nIndexing {products.Length} products...");
 await index.AddRangeAsync(products);
 

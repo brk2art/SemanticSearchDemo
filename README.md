@@ -34,6 +34,38 @@ On startup the program compares two texts twice: once with a hand-written loop
 Both return the same results for the same query, because the model and the maths are identical.
 Only the place where the search runs is different.
 
+## Answering questions (RAG)
+
+After searching, the program passes the top 3 products to a chat model (`llama3.2`)
+together with the question, and the model writes the answer from that text only.
+
+Giving the model context is not enough to keep it honest. With the tent in the prompt,
+"how much is the tent?" was answered with an invented price of $250, although no price
+exists in the data. Repeating the rule after the question ("answer only from the product
+text above, otherwise reply: I don't have that information") stopped this in the cases
+tested.
+
+Run with `dotnet run -- debug` to print the exact prompt sent to the model.
+
+## Evaluation
+
+`RetrievalEval.cs` holds a golden set of 12 questions, each with the product ids that
+should be found, and reports recall@k: of the expected products, the share that appears
+in the top k results. Run it with `dotnet run -- eval`.
+
+| Embedding model | Dimensions | Recall@1 | Recall@3 |
+| --- | --- | --- | --- |
+| all-minilm | 384 | 0.75 | 0.92 |
+| nomic-embed-text | 768 | 0.83 | 1.00 |
+
+The larger model fixed two of the three real failures and broke nothing, at the cost of
+twice the storage per vector. Scores from different models are not comparable, so any
+minimum-score threshold has to be chosen again when the model changes.
+
+Changing the embedding model changes the vector size, so the `products` table has to be
+recreated (`vector(384)` to `vector(768)`) and every product re-embedded. In production
+this would be a new column filled in the background, not a dropped table.
+
 ## Files
 
 | File | Purpose |
@@ -44,6 +76,8 @@ Only the place where the search runs is different.
 | `ProductIndex.cs` | In-memory index |
 | `PgProductIndex.cs` | PostgreSQL index using pgvector |
 | `Program.cs` | Creates the embedding generator, picks an index and runs an interactive search |
+| `RetrievalEval.cs` | Golden set and recall@k |
+
 
 ## Packages
 
@@ -60,7 +94,8 @@ Requires the .NET SDK, [Ollama](https://ollama.com) and, for the PostgreSQL inde
 In-memory index:
 
 ```bash
-ollama pull all-minilm
+ollama pull nomic-embed-text
+ollama pull llama3.2
 dotnet run
 ```
 
@@ -82,7 +117,8 @@ This is a learning project, not production code:
 - Negation is handled poorly: "not waterproof" still returns waterproof products.
 - Attributes that are not in the text, such as price, cannot be searched.
 - Every query returns results, even a meaningless one, because there is no minimum score.
-- There is no evaluation of result quality.
+- Only retrieval is evaluated; answer quality is not measured yet.
+- The golden set is small (12 questions), so one question moves the score by 8 points.
 
 ## Next steps
 

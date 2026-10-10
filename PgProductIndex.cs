@@ -13,7 +13,7 @@ public class PgProductIndex(NpgsqlDataSource db, IEmbeddingGenerator<string, Emb
                 id          int PRIMARY KEY,
                 name        text NOT NULL,
                 description text NOT NULL,
-                embedding   vector(384) NOT NULL
+                embedding   vector(768) NOT NULL
             )
             """);
         await cmd.ExecuteNonQueryAsync();

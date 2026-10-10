@@ -2,8 +2,9 @@
 using OllamaSharp;
 using System.Numerics.Tensors;
 using Npgsql;
+using SemanticSearchDemo;
 
-IEmbeddingGenerator<string, Embedding<float>> generator = new OllamaApiClient(new Uri("http://localhost:11434/"), "all-minilm");
+IEmbeddingGenerator<string, Embedding<float>> generator = new OllamaApiClient(new Uri("http://localhost:11434/"), "nomic-embed-text");
 IChatClient chat = new OllamaApiClient(new Uri("http://localhost:11434/"), "llama3.2");
 
 // One comparison by hand, then the same with the library.
@@ -45,6 +46,13 @@ else
 
 Console.WriteLine($"\nIndexing {products.Length} products...");
 await index.AddRangeAsync(products);
+
+// "eval" runs the golden set and exits instead of starting the chat loop.
+if (args.Contains("eval"))
+{
+    await RetrievalEval.RunAsync(index);
+    return;
+}
 
 // Pass "debug" to print the exact prompt sent to the model.
 var debug = args.Contains("debug");

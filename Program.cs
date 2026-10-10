@@ -56,6 +56,12 @@ if (args.Contains("eval"))
     return;
 }
 
+if (args.Contains("judge"))
+{
+    await JudgeEval.RunAsync(assistant, chat);
+    return;
+}
+
 // Pass "debug" to print the exact prompt sent to the model.
 var debug = args.Contains("debug");
 

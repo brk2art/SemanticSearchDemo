@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace SemanticSearchDemo;
-
-// One test case: a question, and the ids of the products that should be found for it.
+﻿// One test case: a question, and the ids of the products that should be found for it.
 public record EvalCase(string Question, int[] ExpectedIds);
 
 public static class RetrievalEval

@@ -39,9 +39,9 @@ On startup the program compares two texts twice: once with a hand-written loop
 (`VectorMath.Cosine`) and once with `TensorPrimitives.CosineSimilarity` from
 `System.Numerics.Tensors`. Both print the same score, which shows what the library does.
 
-## Two indexes, one interface
+## Indexes behind one interface
 
-`IProductIndex` has two implementations:
+`IProductIndex` has two base implementations:
 
 - `ProductIndex` keeps vectors in memory and computes cosine similarity in C#.
 - `PgProductIndex` stores vectors in PostgreSQL with pgvector and lets the database run the search
@@ -50,8 +50,8 @@ On startup the program compares two texts twice: once with a hand-written loop
 Both return the same results and the same scores for the same question, because the model and
 the maths are identical. Only the place where the search runs is different.
 
-`RerankingIndex` is a third implementation that wraps either of the other two, so reranking
-can be switched on without changing the code that uses the index.
+`RerankingIndex` and `HybridIndex` implement the same interface and wrap another index, so
+each technique can be switched on without changing the code that uses the index.
 
 ## Enrichment
 
@@ -85,6 +85,31 @@ candidates, which is the gap enrichment fills.
 
 Using a general chat model as the reranker is slow (one model call per question). Production
 systems use small dedicated reranking models for the same design.
+
+## Hybrid search (measured, not adopted)
+
+`HybridIndex` runs keyword search next to vector search and merges the two rankings. The
+keyword side is BM25, written by hand: a word counts for more if it is rare in the catalogue.
+The merge is reciprocal rank fusion: each product gets `1 / (60 + rank)` from each list, and
+the sums decide the order. Ranks are used because similarity scores and keyword scores are on
+unrelated scales.
+
+Here it made results worse, so it is off by default:
+
+| Enrichment on, no reranker | Vector only | Hybrid |
+| --- | --- | --- |
+| Held-out Recall@1 | 0.58 | 0.53 |
+| Held-out Recall@3 | 0.84 | 0.68 |
+
+Each regression was one incidental word matching the wrong product. "Something to carry my
+lunch and a jacket" returned two jackets. "I need to open a can" returned the hiking sandals,
+described as "open sandals". "I got a small cut" returned the daypack, a "small" backpack.
+
+This says something about this setup, not about hybrid search in general. The questions are
+needs, not product names. With 30 products, a word that appears once looks rare and important,
+which a large catalogue would correct. And the implementation has no stemming and weights both
+lists equally. In a catalogue with thousands of similar part codes the same test would likely
+come out the other way. Product codes are already found by vector search at this size.
 
 ## Answering questions (RAG)
 
@@ -148,9 +173,9 @@ What these show:
 - **0.91 is the highest tuned recall@1 possible**, because four questions have several correct
   products and one slot.
 
-Both techniques are on by default. Four held-out questions still fail at rank 1 and are left
-as they are: adjusting the system to pass them would turn the held-out set into a second
-tuned set.
+Enrichment and reranking are on by default. Four held-out questions still fail at rank 1 and
+are left as they are: adjusting the system to pass them would turn the held-out set into a
+second tuned set.
 
 Earlier, on a 7-product catalogue with 12 questions, the embedding model was chosen the
 same way:
@@ -169,18 +194,32 @@ this would be a new column filled in the background, not a dropped table.
 
 Run with `dotnet run -- answers`.
 
-`AnswerEval.cs` holds 16 questions: 6 the data can answer (each with words a correct answer
+`AnswerEval.cs` holds 20 questions: 10 the data can answer (each with words a correct answer
 must contain) and 10 it cannot (price, stock, colour, delivery and similar), where the only
 correct reply is the refusal sentence. The check is plain string comparison.
 
-These results were measured on the earlier 7-product catalogue and have not yet been repeated
-on the larger one:
+With the full chain on the 30-product catalogue:
+
+| | Result |
+| --- | --- |
+| Answered when it should refuse | 0 of 10 |
+| Refused when it should answer | 0 of 10 |
+| Answered but missed the point | 1 of 10 |
+
+The one failure: asked about rain, the model named the poncho and the jacket and left out the
+waterproof boots, although all three were retrieved. The boots' description says "wet weather"
+and never "rain". The same omission appeared on the 7-product catalogue with a different
+retrieval setup, which shows that improving retrieval cannot fix a generation failure.
+
+This set does not prove that better retrieval improved answers: its answerable questions are
+easy to retrieve for.
+
+The chat model was chosen on the earlier 7-product catalogue, with 16 questions:
 
 | | llama3.2 (3B), first prompt | llama3.2 (3B), stricter prompt | llama3.1 (8B), stricter prompt |
 | --- | --- | --- | --- |
 | Answered when it should refuse | 3 of 10 | 3 of 10 | 0 of 10 |
 | Refused when it should answer | 0 of 6 | 0 of 6 | 0 of 6 |
-| Answered but missed the point | 0 of 6 | 0 of 6 | 1 of 6 |
 
 Rewording the prompt changed the wording of the wrong answers and none of the count. Told
 "never guess, estimate or assume", the small model answered that a headlamp is worn on the
@@ -190,9 +229,9 @@ head, "implying it requires power". The larger model removed all three failures.
 
 Run with `dotnet run -- judge`.
 
-`JudgeEval.cs` scores the 6 answerable questions from 1 to 5 with the Groundedness and
+`JudgeEval.cs` scores 6 answerable questions from 1 to 5 with the Groundedness and
 Completeness evaluators from `Microsoft.Extensions.AI.Evaluation.Quality`, using llama3.1:8b
-as the judge. Also measured on the 7-product catalogue:
+as the judge. Measured on the 7-product catalogue and not repeated since:
 
 | Question | Truly complete | Completeness | Groundedness |
 | --- | --- | --- | --- |
@@ -219,6 +258,7 @@ measure. The file is kept so the same test can be repeated with a stronger judge
 | `ProductIndex.cs` | In-memory index |
 | `PgProductIndex.cs` | PostgreSQL index using pgvector |
 | `RerankingIndex.cs` | Wraps an index and reorders its top 10 with a chat model |
+| `HybridIndex.cs` | Wraps an index and fuses it with BM25 keyword search |
 | `Enricher.cs` | Generates the needs each product meets, for search |
 | `uses.json` | Cached output of the enricher |
 | `ShopAssistant.cs` | Retrieve, build the prompt, generate the answer |
@@ -270,6 +310,7 @@ Arguments, which can be combined:
 | `judge` | Run the judge-model evaluation, then exit |
 | `no-enrich` | Embed name and description only |
 | `no-rerank` | Skip the reranker and use vector order |
+| `hybrid` | Add keyword search and fuse it with vector results |
 | `debug` | In chat, print the exact prompt sent to the model |
 | `pg` | Use PostgreSQL instead of the in-memory index |
 
@@ -283,27 +324,26 @@ To regenerate the enrichment text after changing its prompt, delete `uses.json`.
 
 This is a learning project, not production code:
 
-- The question sets are small (26 and 19), so one question moves a score by several points.
+- The question sets are small (26, 19 and 20), so one question moves a score by several points.
 - Some expected answers are debatable ("the stove won't light" expects the gas canister; the
   stove is a fair reply), and only one person labelled them.
+- The held-out set has now informed three decisions (enrichment, reranking, hybrid), so it is
+  no longer entirely untouched. A further round of changes would need fresh questions.
 - Reranking uses a general chat model, which is far too slow for a live system.
 - Each question costs two chat-model calls, one to rerank and one to answer.
 - Answer quality is checked by required words, which cannot tell a good answer from a poor one
   that contains the right word. The judge model meant to cover this was not reliable.
-- The answer and judge evaluations still use questions written for the 7-product catalogue.
+- The judge evaluation still uses questions written for the 7-product catalogue.
 - The enrichment cache is keyed by product id only, so a prompt change needs a manual delete.
 - Every start re-embeds all products, even when nothing has changed.
 - There is no vector index, so the search compares the question with every row.
-- There is no keyword search. Product codes are found by vector search at this size, which
-  would not hold with thousands of similar codes.
 - Every question returns three products, even an unrelated one, because there is no minimum score.
 - Attributes that are not in the text, such as price and stock, cannot be answered at all.
 - Each question stands alone; there is no conversation history.
 
 ## Next steps
 
-- Test hybrid search (keyword plus vector) against the held-out set.
-- Update the answer evaluation for the larger catalogue and re-run it end to end.
-- Repeat the judge evaluation with a stronger model.
 - Move from one-line products to real documents, which need chunking.
+- Add need-style questions to the answer evaluation, to measure the retrieval gain end to end.
+- Repeat the judge evaluation with a stronger model.
 - Answer price and stock questions through tool calling instead of the prompt.

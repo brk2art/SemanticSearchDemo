@@ -42,6 +42,13 @@ else
     Console.WriteLine("\nUsing the in-memory index.");
 }
 
+// "hybrid" adds keyword search (BM25) and fuses it with vector results.
+if (args.Contains("hybrid"))
+{
+    index = new HybridIndex(index);
+    Console.WriteLine("Hybrid search: keyword and vector rankings fused.");
+}
+
 Console.WriteLine($"\nIndexing {products.Length} products...");
 await index.AddRangeAsync(products);
 

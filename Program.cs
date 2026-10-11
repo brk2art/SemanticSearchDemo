@@ -14,16 +14,15 @@ Console.WriteLine($"Dimensions:       {a.Length}");
 Console.WriteLine($"Hand-written:     {VectorMath.Cosine(a.Span, b.Span):F4}");
 Console.WriteLine($"TensorPrimitives: {TensorPrimitives.CosineSimilarity(a.Span, b.Span):F4}");
 
-Product[] products =
-[
-    new(1, "Rain jacket", "Lightweight waterproof jacket with a hood"),
-    new(2, "Waterproof boots", "Hiking boots that keep feet dry in wet weather"),
-    new(3, "Tent", "Two-person tent for camping trips"),
-    new(4, "Sleeping bag", "Warm sleeping bag for cold nights"),
-    new(5, "Headlamp", "Bright LED light worn on the head"),
-    new(6, "Camping stove", "Portable gas stove for cooking outdoors"),
-    new(7, "Water bottle", "Insulated bottle that keeps drinks cold"),
-];
+var products = Catalog.Products;
+
+// Enrichment adds generated use cases to the text that gets embedded.
+// On by default; "no-enrich" turns it off, for comparison.
+if (!args.Contains("no-enrich"))
+{
+    Console.WriteLine("\nEnriching products...");
+    products = await Enricher.AddUsesAsync(products, chat);
+}
 
 IProductIndex index;
 if (args.Contains("pg"))
@@ -46,12 +45,26 @@ else
 Console.WriteLine($"\nIndexing {products.Length} products...");
 await index.AddRangeAsync(products);
 
+// Reranking wraps the index so a chat model reorders the top 10.
+// On by default; "no-rerank" turns it off, for comparison.
+if (!args.Contains("no-rerank"))
+{
+    index = new RerankingIndex(index, chat);
+    Console.WriteLine("Reranking the top 10 with the chat model.");
+}
+
 var assistant = new ShopAssistant(index, chat);
 
-// "eval" runs the golden set and exits instead of starting the chat loop.
+// "eval" runs the retrieval golden set (about a second) and exits.
 if (args.Contains("eval"))
 {
     await RetrievalEval.RunAsync(index);
+    return;
+}
+
+// "answers" runs the answer golden set (several minutes) and exits.
+if (args.Contains("answers"))
+{
     await AnswerEval.RunAsync(assistant);
     return;
 }

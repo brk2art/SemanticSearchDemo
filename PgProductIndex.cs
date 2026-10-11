@@ -21,7 +21,7 @@ public class PgProductIndex(NpgsqlDataSource db, IEmbeddingGenerator<string, Emb
 
     public async Task AddRangeAsync(IReadOnlyList<Product> products)
     {
-        var texts = products.Select(p => $"{p.Name}. {p.Description}");
+        var texts = products.Select(p => $"{p.Name}. {p.Description} {p.Uses}".Trim());
         var embeddings = await generator.GenerateAsync(texts);
 
         for (int i = 0; i < products.Count; i++)

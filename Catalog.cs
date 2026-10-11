@@ -1,0 +1,36 @@
+﻿public static class Catalog
+{
+    public static readonly Product[] Products =
+    [
+        new(1, "Rain jacket", "Lightweight waterproof jacket with a hood. Code RJ-100."),
+        new(2, "Waterproof boots", "Hiking boots that keep feet dry in wet weather. Code WB-210."),
+        new(3, "Tent", "Two-person tent for camping trips. Code TN-200."),
+        new(4, "Sleeping bag", "Warm sleeping bag for cold nights. Code SB-300."),
+        new(5, "Headlamp", "Bright LED light worn on the head. Code HL-050."),
+        new(6, "Camping stove", "Portable gas stove for cooking outdoors. Code CS-400."),
+        new(7, "Water bottle", "Insulated bottle that keeps drinks cold. Code WT-075."),
+        new(8, "Family tent", "Four-person tent with two rooms for family camping. Code TN-400."),
+        new(9, "Ultralight tent", "One-person tent that weighs under one kilogram, for solo hikers. Code TN-100."),
+        new(10, "Down jacket", "Insulated jacket for cold, dry weather. Not waterproof. Code DJ-120."),
+        new(11, "Rain poncho", "Packable poncho that covers you and your backpack in the rain. Code RP-110."),
+        new(12, "Trail running shoes", "Light, breathable shoes for running on dry trails. Code TR-220."),
+        new(13, "Hiking sandals", "Open sandals for hot weather and river crossings. Code HS-230."),
+        new(14, "Summer sleeping bag", "Thin sleeping bag for warm nights. Code SB-310."),
+        new(15, "Sleeping mat", "Inflatable mat that insulates you from the cold ground. Code SM-320."),
+        new(16, "Lantern", "Rechargeable lamp that lights up a whole tent or table. Code LN-060."),
+        new(17, "Flashlight", "Handheld torch with a focused long-range beam. Code FL-055."),
+        new(18, "Cooking pot set", "Two aluminium pots and a pan for cooking on a camp stove. Code CP-410."),
+        new(19, "Gas canister", "Fuel canister for portable gas stoves. Code GC-420."),
+        new(20, "Thermos flask", "Vacuum flask that keeps drinks hot for twelve hours. Code TF-080."),
+        new(21, "Cooler box", "Insulated box that keeps food and drinks cold for two days. Code CB-090."),
+        new(22, "Water filter", "Pump filter that makes river water safe to drink. Code WF-070."),
+        new(23, "Backpack 40L", "Forty-litre backpack for weekend hikes. Code BP-500."),
+        new(24, "Daypack 20L", "Small twenty-litre backpack for day trips. Code BP-510."),
+        new(25, "Trekking poles", "Adjustable poles that reduce strain on knees on steep trails. Code TP-600."),
+        new(26, "First aid kit", "Bandages, plasters and antiseptic for minor injuries. Code FA-700."),
+        new(27, "Insect repellent", "Spray that keeps mosquitoes and ticks away. Code IR-710."),
+        new(28, "Sunscreen", "SPF 50 lotion for long days in the sun. Code SS-720."),
+        new(29, "Compass", "Magnetic compass for finding direction without a phone. Code CM-800."),
+        new(30, "Multi-tool", "Folding tool with knife, pliers and screwdriver. Code MT-810."),
+    ];
+}

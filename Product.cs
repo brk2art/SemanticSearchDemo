@@ -1,1 +1,1 @@
-﻿public record Product(int Id, string Name, string Description);
+﻿public record Product(int Id, string Name, string Description, string Uses = "");

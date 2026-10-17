@@ -6,7 +6,8 @@ vector search and RAG, and how to measure whether they work:
 1. turn text into vectors and find the closest ones,
 2. improve the ranking with enrichment and a reranker,
 3. give the results to a chat model so it answers from that data only,
-4. score each step against fixed sets of questions.
+4. let the model look up live data, such as price and stock, through tools,
+5. score each step against fixed sets of questions.
 
 Embeddings and chat run through `Microsoft.Extensions.AI`, using local models served by Ollama.
 Vectors can be kept in memory or stored in PostgreSQL with pgvector.
@@ -167,6 +168,41 @@ It was measured against the hand-written section chunker and scored the same (15
 split long sections while keeping their headings, readers for PDF and Word, and table
 handling. The hand-written chunkers stay as references.
 
+## Tool calling (price and stock)
+
+Price and stock change too often to embed in the product text. They come from tools instead:
+C# methods the model can ask for. The model never runs anything. It replies with a request
+("call GetPriceAndStock with TN-400"), `UseFunctionInvocation()` runs the method and sends the
+result back, and the model writes the answer. A tool question therefore costs at least two
+answering calls.
+
+`ShopTools` has two tools:
+
+- `GetPriceAndStock(code)` returns the price and stock for one product.
+- `FindProducts(word)` returns every product whose name contains a word, most expensive first.
+
+The second exists because search cannot answer "all" or "most". Asked "which tent is the most
+expensive?", the top 3 search results held two tents and a sleeping mat. The ultralight tent
+came fourth, so the model compared two tents and was right by luck. `FindProducts` reads the
+whole catalogue, so the list is complete by construction.
+
+Three things around the model make it reliable:
+
+- **Routing.** `ToolRouter` first asks the chat model one yes-or-no question: does this need
+  live price or stock? On "no", the answering model gets no tools and no tool rule. A prompt
+  rule saying "do not call any tool" was ignored; removing the tools worked.
+- **Only the final message.** `response.Text` joins the text of every message in the tool loop.
+  In one run the model wrote invented prices next to its real tool calls, then answered
+  correctly once the real results came back, and the customer saw both. The answer is now the
+  last assistant message only.
+- **A guard.** Before an answer is returned, code checks it for tool-call text and for any price
+  that no tool returned (sums, differences and 2 to 10 times a returned price are allowed). On a
+  problem the answer is written again from the tool results with no tools offered. If it still
+  fails, a fallback asks the customer to contact staff.
+
+Run with `dotnet run -- tools`. Add `trace` to print every message sent to the model, on every
+call. `dotnet run -- guardtest` checks the guard on fixed examples.
+
 ## Evaluation
 
 ### Retrieval
@@ -287,6 +323,46 @@ explanations also contradicted each other. These evaluators are documented as tu
 and here a local 8B model was grading its own output. The string checks remain the trusted
 measure. The file is kept so the same test can be repeated with a stronger judge.
 
+### Tools
+
+Run with `dotnet run -- tooleval` (about 20 minutes).
+
+`ToolEval.cs` holds 12 tuned questions and 10 held-out questions written after the router, in
+different words. Each lists the tool calls it should make (`TN-400`, `find:tent`, or none) and
+words a correct answer must contain. A row is marked MISSED (a needed call not made), EXTRA (a
+call not needed), BROKEN (tool-call text in the answer), INVENTED (a price no tool returned) or
+ANSWER (calls right, answer incomplete).
+
+One change at a time:
+
+| Change | Tuned (12) | Held out (10) | Tool calls, tuned (minimum 12) |
+| --- | --- | --- | --- |
+| One tool, no rule | 5 | | 13 |
+| Rule: when to call, once per product | 6 | | 18 |
+| Routing | 9 | 8 | 12 |
+| Rule: state each price, give totals | 10 | 8 | 12 |
+| Second tool, `FindProducts` | 10 | 9 | 16 |
+| Answer is the final message only | 12 | 9 | 16 |
+| Quantities need one call; guard | 12 | 10 | 12 |
+
+What these show:
+
+- **The first two runs measured nothing.** The tool rule was built and never sent. `debug`
+  showed it anyway, because it prints what the code meant to send. The trace, which sits in the
+  chat client pipeline, shows what was actually sent.
+- **Wording made the model call more, never less.** "Call it once for each product" fixed every
+  missed comparison. "Do not call any tool" changed nothing, and the return-policy question went
+  from one unneeded lookup to three. Routing brought unneeded calls to zero.
+- **The `FindProducts` row first scored 12 of 12.** One answer held invented prices next to the
+  correct one and passed the word check. The BROKEN and INVENTED checks were added, and the
+  honest score was 10.
+- **Two expected answers were widened after review** ("€39.05 cheaper"; "we don't have the
+  ultralight tent in stock"). Both were judged correct on their merits.
+- **Identical runs can differ.** One row said "in stock" in one run and "out of stock" in the
+  next, so a one-row change can be noise.
+
+After the final change, the answer and retrieval evaluations were rerun and gave the same results.
+
 ## Files
 
 | File | Purpose |
@@ -300,7 +376,10 @@ measure. The file is kept so the same test can be repeated with a stronger judge
 | `ProductSearch/PgProductIndex.cs` | PostgreSQL index using pgvector |
 | `ProductSearch/RerankingIndex.cs` | Wraps an index and reorders its top 10 with a chat model |
 | `ProductSearch/HybridIndex.cs` | Wraps an index and fuses it with BM25 keyword search |
-| `ProductSearch/ShopAssistant.cs` | Retrieve products, build the prompt, generate the answer |
+| `ProductSearch/ShopAssistant.cs` | Retrieve, offer tools when routed, generate, check the answer |
+| `Tools/ShopTools.cs` | `GetPriceAndStock` and `FindProducts`, recording every call and result |
+| `Tools/ToolRouter.cs` | Decides whether a question needs live price or stock |
+| `Evaluation/ToolEval.cs` | Tuned and held-out tool questions, call and answer checks |
 | `DocumentSearch/DocChunk.cs` | A chunk: source file, section and text |
 | `DocumentSearch/Chunker.cs` | Hand-written whole, fixed-size and section chunkers |
 | `DocumentSearch/LibraryChunker.cs` | `MarkdownReader` and `HeaderChunker` from DataIngestion |
@@ -364,6 +443,11 @@ Arguments, which can be combined:
 | `own` | With `docs`: use the hand-written section chunker |
 | `fixed` / `whole` | With `docs`: cut every 40 words / keep whole documents |
 | `show-chunks` | With `docs`: print every chunk before the evaluation |
+| `tools` | Let the assistant look up price and stock |
+| `trace` | With `tools`: print every message sent to the model |
+| `no-route` | With `tools`: offer tools on every question, for comparison |
+| `tooleval` | Run the tool evaluation, then exit |
+| `guardtest` | Check the answer guard on fixed examples, then exit |
 
 `dotnet run -- eval no-enrich no-rerank` reproduces the plain vector-search baseline in about
 a second. With reranking on, every question costs a model call, so an evaluation run takes
@@ -389,7 +473,6 @@ This is a learning project, not production code:
 - Every start re-embeds all products, even when nothing has changed.
 - There is no vector index, so the search compares the question with every row.
 - Every question returns three products, even an unrelated one, because there is no minimum score.
-- Attributes that are not in the text, such as price and stock, cannot be answered at all.
 - Each question stands alone; there is no conversation history.
 - The documents are short, so every chunking method answered all 15 questions; the
   differences show in separation and cost, not accuracy.
@@ -398,10 +481,17 @@ This is a learning project, not production code:
 - Products and documents are searched separately.
 - DataIngestion is a preview package and forced newer versions of Microsoft.Extensions.AI
   and System.Numerics.Tensors.
+- Price and stock come from an in-memory dictionary, not a real service. `FindProducts`
+  matches on product names and reads the code out of the description with a regex.
+- With tools on, a price question costs four model calls: rerank, router, request and answer.
+- The guard cannot catch an answer that contradicts a tool without a wrong number, such as
+  "in stock" when the tool said out of stock.
+- The tool loop has no cap on the number of rounds.
 
 ## Next steps
 
 - Move from one-line products to real documents, which need chunking.
 - Add need-style questions to the answer evaluation, to measure the retrieval gain end to end.
 - Repeat the judge evaluation with a stronger model.
-- Answer price and stock questions through tool calling instead of the prompt.
+- Structured output: the model returns fields such as `inStock`, and code writes the sentence.
+- Cap the tool loop and log every tool call and result.

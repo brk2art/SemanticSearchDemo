@@ -1,10 +1,50 @@
 ﻿using System.ComponentModel;
+using System.Text.RegularExpressions;
 
 // Live data the model can ask for. In a real shop this would query the database or ERP.
 public class ShopTools
 {
     // Every code the model asked for, so the evaluation can check the calls.
     public List<string> Calls { get; } = [];
+
+    // Everything the tools returned, so the evaluation can check the answer's numbers against it.
+    public List<string> Results { get; } = [];
+
+    // Our Product has no Code field: the code is written inside the description ("Code TN-200.").
+    // In a real system code and category would be columns. Here we read the code back with a regex.
+    private static readonly Regex CodePattern = new(@"Code ([A-Z]{2}-\d{3})");
+
+    [Description("Lists every product whose name contains a word, with code, price and stock, most expensive first. " +
+                 "Use it for questions about all products of a kind, such as the cheapest or most expensive tent, " +
+                 "or to check whether the shop sells something.")]
+    public string FindProducts([Description("One word from the product name, for example tent")] string word)
+    {
+        var w = word.Trim().ToLowerInvariant();
+        Calls.Add($"find:{w}");
+
+        // "tents" should still find "Family tent".
+        bool Matches(string name) =>
+            name.Contains(w, StringComparison.OrdinalIgnoreCase) ||
+            (w.EndsWith('s') && name.Contains(w[..^1], StringComparison.OrdinalIgnoreCase));
+
+        var lines = Catalog.Products
+            .Where(p => Matches(p.Name))
+            .Select(p => (p.Name, Code: CodePattern.Match(p.Description).Groups[1].Value))
+            .Where(m => Inventory.ContainsKey(m.Code))
+            .Select(m => (m.Name, m.Code, Item: Inventory[m.Code]))
+            .OrderByDescending(m => m.Item.Price)
+            .Select(m => $"{m.Name} ({m.Code}): price €{m.Item.Price:F2}, " +
+                         (m.Item.Stock == 0 ? "out of stock" : $"{m.Item.Stock} in stock"))
+            .ToList();
+
+        var result = lines.Count == 0
+            ? $"The shop sells no products with \"{w}\" in the name."
+            : string.Join("\n", lines);
+
+        Results.Add(result);
+        Console.WriteLine($"  [tool] FindProducts(\"{w}\") -> {result.Replace("\n", " | ")}");
+        return result;
+    }
 
     private static readonly Dictionary<string, (decimal Price, int Stock)> Inventory =
         new(StringComparer.OrdinalIgnoreCase)
@@ -48,6 +88,7 @@ public class ShopTools
         Calls.Add(code.Trim().ToUpperInvariant());
 
         var result = Lookup(code);
+        Results.Add(result);
 
         // Printed so you can see what the model asked for and what it got back.
         Console.WriteLine($"  [tool] GetPriceAndStock(\"{code}\") -> {result}");

@@ -14,6 +14,29 @@ Console.WriteLine($"Dimensions:       {a.Length}");
 Console.WriteLine($"Hand-written:     {VectorMath.Cosine(a.Span, b.Span):F4}");
 Console.WriteLine($"TensorPrimitives: {TensorPrimitives.CosineSimilarity(a.Span, b.Span):F4}");
 
+// "guardtest" checks the answer guard on fixed examples, without any model, then exits.
+if (args.Contains("guardtest"))
+{
+    List<string> toolResults = ["LN-060: price €39.95, 14 in stock.", "FL-055: price €27.95, 20 in stock."];
+    (string Answer, bool ShouldPass)[] samples =
+    [
+        ("The flashlight is cheaper, priced at €27.95.", true),
+        ("The lantern costs €39.95 and the flashlight €27.95, together €67.90.", true),
+        ("The flashlight is €12.00 cheaper.", true),
+        ("The lantern costs 9.99 euros and the flashlight costs 12.99 euros.", false),
+        ("{\"name\": \"GetPriceAndStock\", \"parameters\": {\"code\":\"FL-055\"}}", false),
+        ("", false),
+    ];
+
+    foreach (var (answer, shouldPass) in samples)
+    {
+        var problem = ShopAssistant.FindProblem(answer, toolResults);
+        var verdict = (problem is null) == shouldPass ? "ok  " : "FAIL";
+        Console.WriteLine($"{verdict} {problem ?? "passes",-45} {answer}");
+    }
+    return;
+}
+
 // "docs" runs the document pipeline (chapter 5) and exits.
 // "fixed" cuts documents every 40 words; without it, each document is one chunk.
 // "show-chunks" prints every chunk before the evaluation.
@@ -106,7 +129,11 @@ IChatClient answerClient = chat;
 if (args.Contains("tools") || args.Contains("tooleval"))
 {
     shopTools = new ShopTools();
-    tools = [AIFunctionFactory.Create(shopTools.GetPriceAndStock)];
+    tools = 
+    [
+        AIFunctionFactory.Create(shopTools.GetPriceAndStock),
+        AIFunctionFactory.Create(shopTools.FindProducts)
+    ];
 
     // UseFunctionInvocation runs steps 3 and 4 for you: when the model asks for a tool,
     // it calls the method and sends the result back to the model automatically.
@@ -145,7 +172,7 @@ if (args.Contains("tools") || args.Contains("tooleval"))
     }
 
     answerClient = builder.Build();
-    Console.WriteLine("Tools: GetPriceAndStock");
+    Console.WriteLine("Tools: GetPriceAndStock, FindProducts");
 }
 
 var assistant = new ShopAssistant(index, answerClient, tools, router);

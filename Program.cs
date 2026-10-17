@@ -20,16 +20,22 @@ Console.WriteLine($"TensorPrimitives: {TensorPrimitives.CosineSimilarity(a.Span,
 if (args.Contains("docs"))
 {
     var folder = Path.Combine(AppContext.BaseDirectory, "docs");
-    // Default: one chunk per section, with "Document > Section" headers.
-    // "whole" or "fixed" switch the chunker; "no-context" drops the headers.
-    var mode = args.Contains("whole") ? "whole" : args.Contains("fixed") ? "fixed" : "sections";
+    // Default: Microsoft.Extensions.DataIngestion's HeaderChunker.
+    // "own" uses the hand-written section chunker; "whole" or "fixed" for comparison;
+    // "no-context" drops the headers from the hand-written one.
+    var mode = args.Contains("whole") ? "whole"
+             : args.Contains("fixed") ? "fixed"
+             : args.Contains("own") ? "sections"
+             : "library";
 
     var chunks = mode switch
     {
         "whole" => Chunker.WholeDocuments(folder),
         "fixed" => Chunker.FixedSize(folder, 40),
-        _ => Chunker.ByHeadings(folder, withContext: !args.Contains("no-context")),
+        "sections" => Chunker.ByHeadings(folder, withContext: !args.Contains("no-context")),
+        _ => await LibraryChunker.ByHeadingsAsync(folder),
     };
+    Console.WriteLine($"\nChunker: {mode}");
     var top = mode == "whole" ? 1 : 3;
 
     if (args.Contains("show-chunks"))

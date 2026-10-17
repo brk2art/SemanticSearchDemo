@@ -127,6 +127,46 @@ in the data. Without any context the same model had declined to answer. Two thin
 
 Run with `dotnet run -- debug` to print the exact prompt sent to the model.
 
+## Documents (chunking and citations)
+
+Shop knowledge also lives in documents. The `docs` folder holds four: returns, delivery,
+warranty and a stove manual. Run with `dotnet run -- docs`.
+
+Documents are split into chunks, one per section, and each chunk starts with its heading
+path, for example `# Camping stove CS-400: user manual ## Before first use`. The top 3 chunks
+are numbered in the prompt, and the answer cites them: "Express delivery costs €9.95 [1]".
+Code reads the numbers back and checks that the cited section is the one that holds the answer.
+
+Fifteen questions (twelve answerable, three that no document answers), measured with four
+chunking methods:
+
+| | Whole documents | Fixed 40 words | Sections | Sections + headers |
+| --- | --- | --- | --- | --- |
+| Correct answers | 15 of 15 | 15 of 15 | 15 of 15 | 15 of 15 |
+| Words sent per question | 182 | 125 | 100 | 117 |
+| Weakest real match | 0.594 | 0.674 | 0.677 | 0.678 |
+| Strongest near miss | 0.625 | 0.656 | 0.671 | 0.619 |
+
+Every method answered correctly, so the deciding measure was separation. With whole
+documents, "how do I clean my tent?" (which no document answers) scored higher than
+"when will I get my refund?". With headers, every real match scored above every near miss.
+
+Two findings:
+
+- **Cutting at headings lost context.** "CS-400" appeared only in the manual's title, so the
+  section chunks no longer contained it, and the model answered that "the CS-400 stove is
+  not mentioned". Writing the heading path into every chunk fixed it.
+- **Adding citations broke refusals.** Five correct, cited answers ended with "I don't have
+  that information." Splitting the instruction into two explicit cases ("if the documents
+  contain the answer... / if they do not, reply with exactly this sentence and nothing else")
+  fixed all five without losing a citation.
+
+The default chunker is `HeaderChunker` from `Microsoft.Extensions.DataIngestion` (preview).
+It was measured against the hand-written section chunker and scored the same (15 of 15,
+12 of 12 citations, 119 against 118 words). It is used for what it adds: size limits that
+split long sections while keeping their headings, readers for PDF and Word, and table
+handling. The hand-written chunkers stay as references.
+
 ## Evaluation
 
 ### Retrieval
@@ -251,21 +291,28 @@ measure. The file is kept so the same test can be repeated with a stronger judge
 
 | File | Purpose |
 | --- | --- |
-| `Product.cs` | The data being searched |
-| `Catalog.cs` | The 30 products |
-| `VectorMath.cs` | Hand-written cosine similarity, kept for comparison |
-| `IProductIndex.cs` | Interface shared by all indexes |
-| `ProductIndex.cs` | In-memory index |
-| `PgProductIndex.cs` | PostgreSQL index using pgvector |
-| `RerankingIndex.cs` | Wraps an index and reorders its top 10 with a chat model |
-| `HybridIndex.cs` | Wraps an index and fuses it with BM25 keyword search |
-| `Enricher.cs` | Generates the needs each product meets, for search |
+| `Program.cs` | Sets up the models and indexes, then runs the chat loop or an evaluation |
+| `ProductSearch/Product.cs` | The data being searched |
+| `ProductSearch/Catalog.cs` | The 30 products |
+| `ProductSearch/Enricher.cs` | Generates the needs each product meets, for search |
+| `ProductSearch/IProductIndex.cs` | Interface shared by all product indexes |
+| `ProductSearch/ProductIndex.cs` | In-memory index |
+| `ProductSearch/PgProductIndex.cs` | PostgreSQL index using pgvector |
+| `ProductSearch/RerankingIndex.cs` | Wraps an index and reorders its top 10 with a chat model |
+| `ProductSearch/HybridIndex.cs` | Wraps an index and fuses it with BM25 keyword search |
+| `ProductSearch/ShopAssistant.cs` | Retrieve products, build the prompt, generate the answer |
+| `DocumentSearch/DocChunk.cs` | A chunk: source file, section and text |
+| `DocumentSearch/Chunker.cs` | Hand-written whole, fixed-size and section chunkers |
+| `DocumentSearch/LibraryChunker.cs` | `MarkdownReader` and `HeaderChunker` from DataIngestion |
+| `DocumentSearch/ChunkIndex.cs` | In-memory vector search over chunks |
+| `DocumentSearch/DocAssistant.cs` | Numbered prompt, answer, citation parsing |
+| `Evaluation/RetrievalEval.cs` | Tuned and held-out sets, recall@k |
+| `Evaluation/AnswerEval.cs` | Refusal and required-word checks for product answers |
+| `Evaluation/JudgeEval.cs` | Groundedness and completeness scored by a judge model |
+| `Evaluation/DocEval.cs` | Document answers, with checks on the cited section |
+| `Shared/VectorMath.cs` | Hand-written cosine similarity, kept for comparison |
+| `docs/*.md` | The four shop documents |
 | `uses.json` | Cached output of the enricher |
-| `ShopAssistant.cs` | Retrieve, build the prompt, generate the answer |
-| `RetrievalEval.cs` | Tuned and held-out sets, recall@k |
-| `AnswerEval.cs` | Golden set and refusal checks for answers |
-| `JudgeEval.cs` | Groundedness and completeness scored by a judge model |
-| `Program.cs` | Sets up the models and the index, then runs the chat loop or an evaluation |
 
 ## Packages
 
@@ -313,6 +360,10 @@ Arguments, which can be combined:
 | `hybrid` | Add keyword search and fuse it with vector results |
 | `debug` | In chat, print the exact prompt sent to the model |
 | `pg` | Use PostgreSQL instead of the in-memory index |
+| `docs` | Run the document evaluation, then exit |
+| `own` | With `docs`: use the hand-written section chunker |
+| `fixed` / `whole` | With `docs`: cut every 40 words / keep whole documents |
+| `show-chunks` | With `docs`: print every chunk before the evaluation |
 
 `dotnet run -- eval no-enrich no-rerank` reproduces the plain vector-search baseline in about
 a second. With reranking on, every question costs a model call, so an evaluation run takes
@@ -340,6 +391,13 @@ This is a learning project, not production code:
 - Every question returns three products, even an unrelated one, because there is no minimum score.
 - Attributes that are not in the text, such as price and stock, cannot be answered at all.
 - Each question stands alone; there is no conversation history.
+- The documents are short, so every chunking method answered all 15 questions; the
+  differences show in separation and cost, not accuracy.
+- Only three document questions are unanswerable, so the separation gap is a hint for a
+  minimum score, not a setting.
+- Products and documents are searched separately.
+- DataIngestion is a preview package and forced newer versions of Microsoft.Extensions.AI
+  and System.Numerics.Tensors.
 
 ## Next steps
 

@@ -1,9 +1,6 @@
 ﻿using Microsoft.Extensions.AI;
 using Microsoft.Extensions.AI.Evaluation;
 using Microsoft.Extensions.AI.Evaluation.Quality;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 // One case: a question and the answer a knowledgeable person would give.
 public record JudgeCase(string Question, string GroundTruth);

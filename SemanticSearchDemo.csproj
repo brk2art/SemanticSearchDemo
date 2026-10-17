@@ -17,4 +17,8 @@
     <PackageReference Include="System.Numerics.Tensors" Version="10.0.12" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="docs\*.md" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

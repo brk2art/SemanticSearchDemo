@@ -14,6 +14,36 @@ Console.WriteLine($"Dimensions:       {a.Length}");
 Console.WriteLine($"Hand-written:     {VectorMath.Cosine(a.Span, b.Span):F4}");
 Console.WriteLine($"TensorPrimitives: {TensorPrimitives.CosineSimilarity(a.Span, b.Span):F4}");
 
+// "docs" runs the document pipeline (chapter 5) and exits.
+// "fixed" cuts documents every 40 words; without it, each document is one chunk.
+// "show-chunks" prints every chunk before the evaluation.
+if (args.Contains("docs"))
+{
+    var folder = Path.Combine(AppContext.BaseDirectory, "docs");
+    // Default: one chunk per section, with "Document > Section" headers.
+    // "whole" or "fixed" switch the chunker; "no-context" drops the headers.
+    var mode = args.Contains("whole") ? "whole" : args.Contains("fixed") ? "fixed" : "sections";
+
+    var chunks = mode switch
+    {
+        "whole" => Chunker.WholeDocuments(folder),
+        "fixed" => Chunker.FixedSize(folder, 40),
+        _ => Chunker.ByHeadings(folder, withContext: !args.Contains("no-context")),
+    };
+    var top = mode == "whole" ? 1 : 3;
+
+    if (args.Contains("show-chunks"))
+        foreach (var c in chunks)
+            Console.WriteLine($"\n[{c.Source} / {c.Section}]\n{c.Text}");
+
+    Console.WriteLine($"\nIndexing {chunks.Count} document chunks...");
+    var docIndex = new ChunkIndex(generator);
+    await docIndex.AddRangeAsync(chunks);
+
+    await DocEval.RunAsync(new DocAssistant(docIndex, chat), top);
+    return;
+}
+
 var products = Catalog.Products;
 
 // Enrichment adds generated use cases to the text that gets embedded.

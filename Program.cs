@@ -96,7 +96,66 @@ if (!args.Contains("no-rerank"))
     Console.WriteLine("Reranking the top 10 with the chat model.");
 }
 
-var assistant = new ShopAssistant(index, chat);
+// "tools" lets the assistant look up live price and stock; "tooleval" also turns them on.
+// "trace" prints every message sent to the model on every call.
+ShopTools? shopTools = null;
+IList<AITool>? tools = null;
+ToolRouter? router = null;
+IChatClient answerClient = chat;
+
+if (args.Contains("tools") || args.Contains("tooleval"))
+{
+    shopTools = new ShopTools();
+    tools = [AIFunctionFactory.Create(shopTools.GetPriceAndStock)];
+
+    // UseFunctionInvocation runs steps 3 and 4 for you: when the model asks for a tool,
+    // it calls the method and sends the result back to the model automatically.
+    var builder = new ChatClientBuilder(chat).UseFunctionInvocation();
+
+    // Added after UseFunctionInvocation, so it sits closer to the model and sees every round.
+    if (args.Contains("trace"))
+    {
+        builder.Use(async (messages, options, next, ct) =>
+        {
+            Console.WriteLine($"\n  ==== model call: {messages.Count()} messages ====");
+            
+            foreach(var m in messages)
+            {
+                foreach (var c in m.Contents)
+                {
+                    var text = c switch
+                    {
+                        TextContent t => t.Text,
+                        FunctionCallContent f => $"CALL {f.Name}({string.Join(", ", f.Arguments?.Select(a => $"{a.Key}={a.Value}") ?? [])})",
+                        FunctionResultContent r => $"RESULT {r.Result}",
+                        _ => c.GetType().Name
+                    };
+                    Console.WriteLine($"  [{m.Role}] {text}");
+                }
+            }
+            await next(messages, options, ct);
+        });
+    }
+
+    // Routing is on by default; "no-route" turns it off, for comparison.
+    if (!args.Contains("no-route"))
+    {
+        router = new ToolRouter(chat);
+        Console.WriteLine("Routing: tools only when the question needs price or stock.");
+    }
+
+    answerClient = builder.Build();
+    Console.WriteLine("Tools: GetPriceAndStock");
+}
+
+var assistant = new ShopAssistant(index, answerClient, tools, router);
+
+// "tooleval" checks which tools were called, then exits.
+if (args.Contains("tooleval"))
+{
+    await ToolEval.RunAsync(assistant, shopTools!);
+    return;
+}
 
 // "eval" runs the retrieval golden set (about a second) and exits.
 if (args.Contains("eval"))

@@ -2,6 +2,7 @@
 using OllamaSharp;
 using System.Numerics.Tensors;
 using Npgsql;
+using ModelContextProtocol.Client;
 
 IEmbeddingGenerator<string, Embedding<float>> generator = new OllamaApiClient(new Uri("http://localhost:11434/"), "nomic-embed-text");
 IChatClient chat = new OllamaApiClient(new Uri("http://localhost:11434/"), "llama3.1:8b");
@@ -136,9 +137,57 @@ if (args.Contains("tools") || args.Contains("tooleval"))
         AIFunctionFactory.Create(shopTools.FindProducts)
     ];
 
+    // "mcp": take the tools from the ShopMcpServer process instead of from this app.
+    // The model sees the same names, descriptions and schemas; only where the code runs changes.
+    if (args.Contains("mcp"))
+    {
+        // Run the built dll, not "dotnet run": dotnet run can print build output to stdout,
+        // which is the protocol channel.
+        var serverDll = Path.GetFullPath(Path.Combine(
+            Directory.GetCurrentDirectory(), "ShopMcpServer", "bin", "Debug", "net10.0", "ShopMcpServer.dll"));
+
+        var transport = new StdioClientTransport(new StdioClientTransportOptions
+        {
+            Name = "shop",
+            Command = "dotnet",
+            Arguments = [serverDll]
+        });
+
+        // Not disposed on purpose: the server process lives as long as this app.
+        var mcp = await McpClient.CreateAsync(transport);
+        var mcpTools = await mcp.ListToolsAsync();
+
+        foreach(var t in mcpTools)
+            Console.WriteLine($"MCP tool: {t.Name}");
+
+        // McpClientTool is an AIFunction, so it plugs into ChatOptions.Tools like any other tool.
+        tools = [.. mcpTools];
+    }
+
     // UseFunctionInvocation runs steps 3 and 4 for you: when the model asks for a tool,
     // it calls the method and sends the result back to the model automatically.
-    var builder = new ChatClientBuilder(chat).UseFunctionInvocation();
+    var recordRemote = args.Contains("mcp");
+    var shop = shopTools;   // a local copy for the lambda below
+
+    var builder = new ChatClientBuilder(chat).UseFunctionInvocation(configure: f =>
+    {
+        // Every tool call passes through here, wherever the tool runs.
+        // Local tools record themselves (inside ShopTools); MCP tools run in another
+        // process, so their calls and results are recorded here for ToolEval.
+        f.FunctionInvoker = async (ctx, ct) =>
+        {
+            var result = await ctx.Function.InvokeAsync(ctx.Arguments, ct);
+
+            if (recordRemote)
+            {
+                var arg = ctx.Arguments.Values.FirstOrDefault()?.ToString()?.Trim() ?? "";
+                shop.Calls.Add(ctx.Function.Name == "FindProducts" ? $"find:{arg.ToLowerInvariant()}" : arg.ToUpperInvariant());
+                shop.Results.Add(result?.ToString() ?? "");
+            }
+
+            return result;
+        };
+    });
 
     // Added after UseFunctionInvocation, so it sits closer to the model and sees every round.
     if (args.Contains("trace"))

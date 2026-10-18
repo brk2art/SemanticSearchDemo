@@ -14,6 +14,7 @@
     <PackageReference Include="Microsoft.Extensions.DataIngestion" Version="10.11.0-preview.1.26513.7" />
     <PackageReference Include="Microsoft.Extensions.DataIngestion.Markdig" Version="10.11.0-preview.1.26513.7" />
     <PackageReference Include="Microsoft.ML.Tokenizers.Data.O200kBase" Version="2.0.1" />
+    <PackageReference Include="ModelContextProtocol.Core" Version="2.2.0" />
     <PackageReference Include="Npgsql" Version="10.0.3" />
     <PackageReference Include="OllamaSharp" Version="5.5.0" />
     <PackageReference Include="Pgvector" Version="0.3.2" />
@@ -22,6 +23,13 @@
 
   <ItemGroup>
     <None Update="docs\*.md" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- ShopMcpServer is its own project; don't compile or include its files in this one. -->
+  <ItemGroup>
+    <Compile Remove="ShopMcpServer\**" />
+    <Content Remove="ShopMcpServer\**" />
+    <None Remove="ShopMcpServer\**" />
   </ItemGroup>
 
 </Project>

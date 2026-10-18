@@ -203,6 +203,34 @@ Three things around the model make it reliable:
 Run with `dotnet run -- tools`. Add `trace` to print every message sent to the model, on every
 call. `dotnet run -- guardtest` checks the guard on fixed examples.
 
+## Structured output (the model reads, code writes)
+
+With tool calling, the model writes the sentence that states the price or stock, so it can
+state it wrong. In one run it answered "we have the ultralight tent in stock" after the tool
+returned "out of stock". The guard could not see it: there was no wrong number.
+
+With `structured`, the model only describes the question, as JSON that follows a schema made
+from the `ShopRequest` record:
+
+    {"kind":"compare","codes":["LN-060","FL-055"],"category":"","quantity":1}
+
+`AnswerWriter` then fetches the data and writes the sentence, including any total, in code.
+Codes the model returns are checked against the search results, like any other input.
+
+Two findings:
+
+- **The schema controls the shape, only the prompt controls the meaning.** The schema is sent
+  to Ollama as the output format, which guarantees valid JSON, but the model never reads it.
+  With field descriptions only in the schema, 0 of 15 kinds were right ("kind": "TN-400").
+  With the schema also pasted into the prompt, 11 of 15.
+- **Don't ask the model to make distinctions code can make.** "Price" against "total" and
+  "cheapest" for two named products confused it. Merging totals into "price" (code adds them)
+  and renaming the comparison "compare" took it to 14 of 15. The 15th followed the new
+  definition; the test label had not been updated.
+
+Run with `dotnet run -- tooleval structured`, or `dotnet run -- extract` to check only the
+extraction.
+
 ## Evaluation
 
 ### Retrieval
@@ -363,6 +391,13 @@ What these show:
 
 After the final change, the answer and retrieval evaluations were rerun and gave the same results.
 
+The same 22 questions with `structured`: 12 of 12 tuned and 9 of 10 held out. The kayak is
+refused without checking the catalogue, because the model returns "other" with no product to
+look up. It took 139 to 168 seconds against 217 for tool calling, with one model call fewer per
+price question. Every price and stock statement is written by code, so none can contradict the
+data. The answers read like a form ("We have 6 of the water filter in stock") and don't
+answer the question as asked ("is it under 10 euros?" gets only the price).
+
 ## Files
 
 | File | Purpose |
@@ -377,8 +412,10 @@ After the final change, the answer and retrieval evaluations were rerun and gave
 | `ProductSearch/RerankingIndex.cs` | Wraps an index and reorders its top 10 with a chat model |
 | `ProductSearch/HybridIndex.cs` | Wraps an index and fuses it with BM25 keyword search |
 | `ProductSearch/ShopAssistant.cs` | Retrieve, offer tools when routed, generate, check the answer |
+| `ProductSearch/AnswerWriter.cs` | Writes price, stock and comparison answers from data |
 | `Tools/ShopTools.cs` | `GetPriceAndStock` and `FindProducts`, recording every call and result |
 | `Tools/ToolRouter.cs` | Decides whether a question needs live price or stock |
+| `Tools/ShopRequest.cs` | The request record (the schema) and `RequestExtractor` |
 | `Evaluation/ToolEval.cs` | Tuned and held-out tool questions, call and answer checks |
 | `DocumentSearch/DocChunk.cs` | A chunk: source file, section and text |
 | `DocumentSearch/Chunker.cs` | Hand-written whole, fixed-size and section chunkers |
@@ -389,6 +426,7 @@ After the final change, the answer and retrieval evaluations were rerun and gave
 | `Evaluation/AnswerEval.cs` | Refusal and required-word checks for product answers |
 | `Evaluation/JudgeEval.cs` | Groundedness and completeness scored by a judge model |
 | `Evaluation/DocEval.cs` | Document answers, with checks on the cited section |
+| `Evaluation/ExtractEval.cs` | Checks kind, codes, category and quantity for 15 questions |
 | `Shared/VectorMath.cs` | Hand-written cosine similarity, kept for comparison |
 | `docs/*.md` | The four shop documents |
 | `uses.json` | Cached output of the enricher |
@@ -448,6 +486,8 @@ Arguments, which can be combined:
 | `no-route` | With `tools`: offer tools on every question, for comparison |
 | `tooleval` | Run the tool evaluation, then exit |
 | `guardtest` | Check the answer guard on fixed examples, then exit |
+| `structured` | With `tools`: the model extracts the request, code writes the answer |
+| `extract` | Run the extraction evaluation, then exit |
 
 `dotnet run -- eval no-enrich no-rerank` reproduces the plain vector-search baseline in about
 a second. With reranking on, every question costs a model call, so an evaluation run takes
@@ -484,14 +524,15 @@ This is a learning project, not production code:
 - Price and stock come from an in-memory dictionary, not a real service. `FindProducts`
   matches on product names and reads the code out of the description with a regex.
 - With tools on, a price question costs four model calls: rerank, router, request and answer.
-- The guard cannot catch an answer that contradicts a tool without a wrong number, such as
-  "in stock" when the tool said out of stock.
+- In tool-calling mode, the guard cannot catch an answer that contradicts a tool without a
+  wrong number. Structured mode avoids this, at the cost of template-sounding answers.
 - The tool loop has no cap on the number of rounds.
+
 
 ## Next steps
 
 - Move from one-line products to real documents, which need chunking.
 - Add need-style questions to the answer evaluation, to measure the retrieval gain end to end.
 - Repeat the judge evaluation with a stronger model.
-- Structured output: the model returns fields such as `inStock`, and code writes the sentence.
+- Extract `MaxPrice` and `ProductName` so structured answers can say "yes, under €10" and "we don't sell kayaks".
 - Cap the tool loop and log every tool call and result.

@@ -1,5 +1,9 @@
 ﻿using System.ComponentModel;
+using System.Globalization;
 using System.Text.RegularExpressions;
+
+// One product's live data, as a value code can use (not text for a model to read).
+public record StockItem(string Code, string Name, decimal Price, int Stock);
 
 // Live data the model can ask for. In a real shop this would query the database or ERP.
 public class ShopTools
@@ -13,6 +17,47 @@ public class ShopTools
     // Our Product has no Code field: the code is written inside the description ("Code TN-200.").
     // In a real system code and category would be columns. Here we read the code back with a regex.
     private static readonly Regex CodePattern = new(@"Code ([A-Z]{2}-\d{3})");
+
+    // Product names by code, read from the catalogue once.
+    private static readonly Dictionary<string, string> Names = Catalog.Products
+        .Where(p => CodePattern.IsMatch(p.Description))
+        .ToDictionary(p => CodePattern.Match(p.Description).Groups[1].Value, p => p.Name);
+
+    // For code, not for the model: the same data as the tools, returned as values.
+    // They record calls too, so ToolEval can check them the same way.
+    public StockItem? Get(string code)
+    {
+        var c = code.Trim().ToUpperInvariant();
+        Calls.Add(c);
+
+        var item = Inventory.TryGetValue(c, out var data) && Names.TryGetValue(c, out var name)
+            ? new StockItem(c, name, data.Price, data.Stock)
+            : null;
+
+        // Recorded so the evaluation can check the answer's prices against real data.
+        if (item is not null)
+            Results.Add($"{c}: price €{item.Price.ToString("F2", CultureInfo.InvariantCulture)}");
+
+        return item;
+    }
+
+    public List<StockItem> FindAll(string word)
+    {
+        var w = word.Trim().ToLowerInvariant();
+        Calls.Add($"find:{w}");
+
+        bool Matches(string name) =>
+            name.Contains(w, StringComparison.OrdinalIgnoreCase) ||
+            (w.EndsWith('s') && name.Contains(w[..^1], StringComparison.OrdinalIgnoreCase));
+
+        var items = Names
+            .Where(n => Matches(n.Value) && Inventory.ContainsKey(n.Key))
+            .Select(n => new StockItem(n.Key, n.Value, Inventory[n.Key].Price, Inventory[n.Key].Stock))
+            .ToList();
+
+        Results.AddRange(items.Select(i => $"{i.Code}: price €{i.Price.ToString("F2", CultureInfo.InvariantCulture)}"));
+        return items;
+    }
 
     [Description("Lists every product whose name contains a word, with code, price and stock, most expensive first. " +
                  "Use it for questions about all products of a kind, such as the cheapest or most expensive tent, " +

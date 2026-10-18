@@ -7,7 +7,8 @@ using Microsoft.Extensions.AI;
 public record AssistantReply(string Answer, List<(Product Product, float Score)> Results, string Prompt, string Guard = "ok");
 
 // The read path: retrieve, build the prompt, generate (calling tools if offered), check the answer.
-public class ShopAssistant(IProductIndex index, IChatClient chat, IList<AITool>? tools = null, ToolRouter? router = null)
+public class ShopAssistant(IProductIndex index, IChatClient chat, IList<AITool>? tools = null, 
+    ToolRouter? router = null, RequestExtractor? extractor = null, ShopTools? shopTools = null)
 {
     public const string Refusal = "I don't have that information.";
     public const string Fallback = "Sorry, I can't give you a reliable answer to that right now. Please ask a member of staff.";
@@ -52,6 +53,21 @@ public class ShopAssistant(IProductIndex index, IChatClient chat, IList<AITool>?
             Answer only from the product text above or from tool results. If neither states
             the answer, reply exactly: {Refusal}
             """;
+
+        // Structured path: the model only describes the request; code fetches data and writes the answer.
+        if (useTools && extractor is not null && shopTools is not null)
+        {
+            var (request, json) = await extractor.ExtractAsync(question, context);
+            Console.WriteLine($"  [extract] {json}");
+
+            var allowedCodes = results
+                .Select(r => Regex.Match(r.Product.Description, @"Code ([A-Z]{2}-\d{3})").Groups[1].Value)
+                .Where(c => c != "")
+                .ToHashSet();
+
+            var structured = request is null ? Refusal : AnswerWriter.Write(request, shopTools, allowedCodes);
+            return new AssistantReply(structured, results, $"{system}\n{userMessage}");
+        }
 
         List<ChatMessage> messages =
         [

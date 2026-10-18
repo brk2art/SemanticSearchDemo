@@ -124,6 +124,7 @@ if (!args.Contains("no-rerank"))
 ShopTools? shopTools = null;
 IList<AITool>? tools = null;
 ToolRouter? router = null;
+RequestExtractor? extractor = null;
 IChatClient answerClient = chat;
 
 if (args.Contains("tools") || args.Contains("tooleval"))
@@ -171,11 +172,26 @@ if (args.Contains("tools") || args.Contains("tooleval"))
         Console.WriteLine("Routing: tools only when the question needs price or stock.");
     }
 
+    // "structured": the model extracts the request as JSON; code fetches data and writes the answer.
+    if (args.Contains("structured"))
+    {
+        extractor = new RequestExtractor(chat);
+        Console.WriteLine("Answers: structured (model extracts, code writes)");
+    }
+
     answerClient = builder.Build();
     Console.WriteLine("Tools: GetPriceAndStock, FindProducts");
 }
 
-var assistant = new ShopAssistant(index, answerClient, tools, router);
+var assistant = new ShopAssistant(index, answerClient, tools, router, extractor, shopTools);
+
+// "extract" measures structured output: does the model understand what each question asks for?
+if (args.Contains("extract"))
+{
+    Console.WriteLine($"\nSchema:\n{RequestExtractor.SchemaText}");
+    await ExtractEval.RunAsync(index, new RequestExtractor(chat));
+    return;
+}
 
 // "tooleval" checks which tools were called, then exits.
 if (args.Contains("tooleval"))

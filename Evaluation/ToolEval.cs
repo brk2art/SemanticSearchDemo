@@ -1,6 +1,7 @@
 ﻿// A question, the product codes the tool must be called with (empty: no call needed),
 // and words a correct answer must contain. "a|b" means a or b.
 using System.Text.RegularExpressions;
+using System.Diagnostics;
 
 public record ToolCase(string Question, string[] ExpectedCodes, string[] MustMention);
 
@@ -62,6 +63,8 @@ public static class ToolEval
 
     private static async Task RunSetAsync(string name, ToolCase[] cases, ShopAssistant assistant, ShopTools tools)
     {
+        var clock = Stopwatch.StartNew();
+
         int rightCalls = 0, missedCases = 0, extraCases = 0, brokenCases = 0, inventedCases = 0, correct = 0, totalCalls = 0;
 
         Console.WriteLine($"\n{name} tool questions ({cases.Length})");
@@ -125,5 +128,6 @@ public static class ToolEval
         Console.WriteLine($"  Invented prices:             {inventedCases}");
         Console.WriteLine($"  Correct answers:             {correct} of {cases.Length}");
         Console.WriteLine($"  Tool calls in total:         {totalCalls} (minimum needed: {cases.Sum(c => c.ExpectedCodes.Length)})");
+        Console.WriteLine($"  Time:                        {clock.Elapsed.TotalSeconds:F0} s");
     }
 }

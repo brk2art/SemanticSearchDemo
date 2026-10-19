@@ -231,6 +231,32 @@ Two findings:
 Run with `dotnet run -- tooleval structured`, or `dotnet run -- extract` to check only the
 extraction.
 
+## MCP server (sharing the tools)
+
+`ShopMcpServer` publishes `GetPriceAndStock` and `FindProducts` through the Model Context
+Protocol, so any MCP client can use them: this app, GitHub Copilot, or an agent. It links the
+same `ShopTools.cs` as the main project, so there is one copy of the business code and two hosts.
+`ShopMcpTools` is a thin adapter over it, like a controller over a service.
+
+The server uses the stdio transport: the client starts it as a child process and they exchange
+JSON-RPC messages over stdin and stdout. Anything else written to stdout breaks the protocol,
+so the server sends its console output to stderr.
+
+With `mcp`, the app asks the server for its tools (`ListToolsAsync`) instead of creating them
+itself. The model sees the same names, descriptions and schemas, and the 22 tool questions
+scored the same: 12 of 12 tuned, 10 of 10 held out. Two details made that comparison fair: the
+SDK publishes method names in snake_case, so the names are set explicitly to match the prompt,
+and calls are recorded in the client's `FunctionInvoker` hook, because the tools now run in
+another process.
+
+Copilot in Visual Studio used the same server with no code changes, through a `.mcp.json` file.
+Asked for the family tent's price, it called `FindProducts`: it had no product list, so it could
+not have known the code. Tools meant for clients you don't control must work without your app's
+context.
+
+Build with `dotnet build SemanticSearchDemo.slnx`, which also rebuilds the server, then run
+`dotnet run -- tools mcp`.
+
 ## Evaluation
 
 ### Retrieval
@@ -430,6 +456,8 @@ answer the question as asked ("is it under 10 euros?" gets only the price).
 | `Shared/VectorMath.cs` | Hand-written cosine similarity, kept for comparison |
 | `docs/*.md` | The four shop documents |
 | `uses.json` | Cached output of the enricher |
+| `ShopMcpServer/Program.cs` | MCP server: stdio transport, `ShopMcpTools` adapter over `ShopTools` |
+| `SemanticSearchDemo.slnx` | Both projects, so one build updates the server too |
 
 ## Packages
 
@@ -488,6 +516,7 @@ Arguments, which can be combined:
 | `guardtest` | Check the answer guard on fixed examples, then exit |
 | `structured` | With `tools`: the model extracts the request, code writes the answer |
 | `extract` | Run the extraction evaluation, then exit |
+| `mcp` | With `tools` or `tooleval`: take the tools from `ShopMcpServer` |
 
 `dotnet run -- eval no-enrich no-rerank` reproduces the plain vector-search baseline in about
 a second. With reranking on, every question costs a model call, so an evaluation run takes
@@ -527,6 +556,8 @@ This is a learning project, not production code:
 - In tool-calling mode, the guard cannot catch an answer that contradicts a tool without a
   wrong number. Structured mode avoids this, at the cost of template-sounding answers.
 - The tool loop has no cap on the number of rounds.
+- The MCP server uses stdio only. A shared server would use HTTP, with each request carrying
+  the caller's identity.
 
 
 ## Next steps

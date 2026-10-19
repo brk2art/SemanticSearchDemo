@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "shop": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": [ "C:\\Projects\\SemanticSearchDemo\\ShopMcpServer\\bin\\Debug\\net10.0\\ShopMcpServer.dll" ]
+    }
+  }
+}

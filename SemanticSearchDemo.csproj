@@ -8,18 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Include="ShopMcpServer\.vs\ShopMcpServer.slnx\v18\DocumentLayout.json" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="ShopMcpServer\.vs\ShopMcpServer.slnx\DesignTimeBuild\.dtbcache.v2" />
-    <None Include="ShopMcpServer\.vs\ShopMcpServer.slnx\FileContentIndex\20276e0f-04e9-44cd-83f8-b07e11ac8826.vsidx" />
-    <None Include="ShopMcpServer\.vs\ShopMcpServer.slnx\FileContentIndex\56ad5b8c-ee01-4660-8844-30950399c661.vsidx" />
-    <None Include="ShopMcpServer\.vs\ShopMcpServer.slnx\v18\.futdcache.v2" />
-    <None Include="ShopMcpServer\ShopMcpServer.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
+    <PackageReference Include="Microsoft.Agents.AI" Version="1.25.0" />
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.11.0" />
     <PackageReference Include="Microsoft.Extensions.AI.Evaluation" Version="10.10.0" />
     <PackageReference Include="Microsoft.Extensions.AI.Evaluation.Quality" Version="10.10.0" />
@@ -38,5 +27,10 @@
   </ItemGroup>
 
   <!-- ShopMcpServer is its own project; don't compile or include its files in this one. -->
+  <ItemGroup>
+    <Compile Remove="ShopMcpServer\**" />
+    <Content Remove="ShopMcpServer\**" />
+    <None Remove="ShopMcpServer\**" />
+  </ItemGroup>
 
 </Project>

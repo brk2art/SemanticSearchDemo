@@ -3,6 +3,7 @@ using OllamaSharp;
 using System.Numerics.Tensors;
 using Npgsql;
 using ModelContextProtocol.Client;
+using Microsoft.Agents.AI;
 
 IEmbeddingGenerator<string, Embedding<float>> generator = new OllamaApiClient(new Uri("http://localhost:11434/"), "nomic-embed-text");
 IChatClient chat = new OllamaApiClient(new Uri("http://localhost:11434/"), "llama3.1:8b");
@@ -118,6 +119,82 @@ if (!args.Contains("no-rerank"))
 {
     index = new RerankingIndex(index, chat);
     Console.WriteLine("Reranking the top 10 with the chat model.");
+}
+
+// "agent": the model plans its own steps, with search, price and catalogue tools.
+if (args.Contains("agent") || args.Contains("agenteval"))
+{
+    var agentShop = new ShopTools();
+    var agentTools = new AgentTools(index, agentShop);
+
+    // "qwen": run the agent on another model, to see whether the model or the design is the limit.
+    var agentModel = args.Contains("qwen") ? "qwen2.5:7b" : "llama3.1:8b";
+    // Agent runs make many slow local calls, and Ollama may need to load the model first.
+    // HttpClient's default 100-second timeout is too short for that.
+    var agentHttp = new HttpClient
+    {
+        BaseAddress = new Uri("http://localhost:11434/"),
+        Timeout = TimeSpan.FromMinutes(10),
+    };
+    IChatClient agentBase = new OllamaApiClient(agentHttp, agentModel);
+
+    // Temperature 0 on every model call the agent makes, so runs can be compared.
+    var agentChat = agentBase.AsBuilder().ConfigureOptions(o => o.Temperature = 0).Build();
+    Console.WriteLine($"Agent model: {agentModel}");
+
+    const string agentInstructions = """
+        You are a shop assistant agent for an outdoor equipment store. Follow these steps:
+        1. List the needs for the customer's trip, such as sleeping, cooking, light and water.
+           Leave out anything the customer says they already have.
+        2. Call SearchProducts once for each need, with a short description of that need.
+        3. From the search results, choose one product per need. Decide the quantity:
+           one per person for personal items such as sleeping bags and sleeping mats.
+        4. Call SubmitShoppingList with every chosen product and its quantity.
+           The shop checks stock and works out the prices and the total.
+        5. If SubmitShoppingList reports a problem, replace those products with others
+           from the search results and call SubmitShoppingList again.
+        Do not describe what you are going to do; call the tools.
+        Do not state prices or totals yourself.
+        When the list is accepted, reply with one or two sentences on why these products fit the trip.
+        """;
+
+    AIAgent agent = new ChatClientAgent(
+        agentChat,
+        instructions: agentInstructions,
+        name: "ShopAgent",
+        tools:
+        [
+            AIFunctionFactory.Create(agentTools.SearchProducts),
+            AIFunctionFactory.Create(agentTools.SubmitShoppingList),
+        ]);
+
+    // A session keeps the conversation, so a follow-up question can refer to the last answer.
+    var session = await agent.CreateSessionAsync();
+
+    // "agenteval": run the five goals and exit.
+    if (args.Contains("agenteval"))
+    {
+        await AgentEval.RunAsync(agent, agentTools);
+        return;
+    }
+
+    Console.WriteLine("Agent ready. Ask something; leave it empty to quit.");
+    while (true)
+    {
+        Console.Write("\n> ");
+        var goal = Console.ReadLine();
+        if (string.IsNullOrWhiteSpace(goal))
+            break;
+
+        agentTools.Reset();
+        var response = await agent.RunAsync(goal, session);
+
+        Console.WriteLine($"\nAgent: {response.Text}");
+        Console.WriteLine(agentTools.FinalList is null
+            ? "\n(No shopping list was submitted.)"
+            : $"\nShopping list (checked and totalled by code):\n{agentTools.FinalList}");
+    }
+    return;
 }
 
 // "tools" lets the assistant look up live price and stock; "tooleval" also turns them on.

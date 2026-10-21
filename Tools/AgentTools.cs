@@ -15,6 +15,25 @@ public class AgentTools(IProductIndex index, ShopTools shop)
     // Every code a search has shown the agent in this run. Anything else is refused.
     private readonly HashSet<string> seen = [];
 
+    // Searches already made in this run, so a repeat can be refused.
+    private readonly HashSet<string> searched = [];
+
+    // A budget of tool calls per run, so a looping agent is stopped by code.
+    private const int MaxToolCalls = 12;
+    private int toolCalls;
+    public int Blocked { get; private set; }
+
+    // Counts a tool call; returns a stop message once the budget is used up.
+    private string? OverBudget()
+    {
+        toolCalls++;
+        if (toolCalls <= MaxToolCalls)
+            return null;
+
+        Blocked++;
+        return "Limit reached: no more tool calls. Reply to the customer now with what you have.";
+    }
+
     // The shopping list as code wrote it, once the agent submitted a valid one.
     public string? FinalList { get; private set; }
     // What the evaluation reads: the accepted list and how the run went.
@@ -27,15 +46,30 @@ public class AgentTools(IProductIndex index, ShopTools shop)
     public void Reset()
     {
         seen.Clear();
+        searched.Clear();
         FinalList = null;
         Accepted = [];
-        Searches = Submissions = Rejections = 0;
+        Searches = Submissions = Rejections = Blocked = 0;
+        toolCalls = 0;
     }
 
     [Description("Searches the catalogue by meaning and returns the 5 best matching products with name, description and code. " +
                  "Use it once for each need, with a short description of that need.")]
     public async Task<string> SearchProducts([Description("What the customer needs, in plain words")] string need)
     {
+        if (OverBudget() is { } stop)
+        {
+            Console.WriteLine($"  [tool] SearchProducts(\"{need}\") -> refused: limit reached");
+            return stop;
+        }
+        if (!searched.Add(need.Trim().ToLowerInvariant()))
+        {
+            Blocked++;
+            Console.WriteLine($"  [tool] SearchProducts(\"{need}\") -> refused: repeated search");
+            return "You already searched for this, and the results have not changed. " +
+                   "Use them, or tell the customer that the shop has nothing suitable.";
+        }
+
         Searches++;
         var results = await index.SearchAsync(need, 5);
         foreach (var r in results)
@@ -54,6 +88,18 @@ public class AgentTools(IProductIndex index, ShopTools shop)
                  "If it reports a problem, change the list and call it again.")]
     public string SubmitShoppingList([Description("The chosen products, each with its code and quantity")] ListItem[] items)
     {
+        if (OverBudget() is { } stop)
+        {
+            Console.WriteLine("  [tool] SubmitShoppingList -> refused: limit reached");
+            return stop;
+        }
+        if (FinalList is not null)
+        {
+            Blocked++;
+            Console.WriteLine("  [tool] SubmitShoppingList -> refused: already accepted");
+            return "The list was already accepted. Do not submit it again; write your short reply to the customer now.";
+        }
+
         Submissions++;
         Console.WriteLine($"  [tool] SubmitShoppingList({string.Join(", ", items.Select(i => $"{i.Code} x{i.Quantity}"))})");
 

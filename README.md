@@ -257,6 +257,39 @@ context.
 Build with `dotnet build SemanticSearchDemo.slnx`, which also rebuilds the server, then run
 `dotnet run -- tools mcp`.
 
+## Agent or workflow: who decides the next step?
+
+A customer describes a trip; the shop answers with a shopping list and a total. Two designs do the same job:
+
+- **Agent** (`ChatClientAgent`, Microsoft Agent Framework): the model gets `SearchProducts` and `SubmitShoppingList` and decides what to call, how often, and when to stop. The tools check what code can check: codes must come from a search, stock must cover the quantity, totals are computed in code, repeats and calls past 12 are refused.
+- **Workflow** (`ShopWorkflow`): code runs five fixed steps (plan → search → pick → check → answer). The model makes three small structured decisions: what is needed, which product fits each need, and one sentence of advice. Code searches, checks stock, computes totals and writes every sentence that states a fact.
+
+`AgentEval` scores both on five goals: a couple camping who already own a tent, a rainy day hike, a family of four with no gear, the out-of-stock ultralight tent, and kayaks (not sold).
+
+```
+dotnet run -- workfloweval qwen
+dotnet run -- agenteval qwen
+```
+
+| Design (qwen2.5:7b, local) | Goals met | Time, 5 goals |
+|---|---|---|
+| Agent | 2 / 5 | ~1,040 s |
+| Agent with stricter tool guards | 0 / 5 | – |
+| Workflow | 3 / 5 | 333 s |
+
+**Why the agent failed:** it stopped after describing a plan, looped (34 identical searches on one goal), and ignored tool refusals. Stricter tools made it worse, because a tool can refuse but only the model can end the loop.
+
+**Where the workflow still fails:** only where the model judges meaning.
+- No sleeping mats for the couple: the plan didn't list them.
+- Kayak: the picker chose hiking sandals for "kayak with paddle"; code then reported, correctly and uselessly, that the sandals are out of stock.
+- The family goal passed with two tents (one picked for "camp chairs"), because the eval doesn't check for extra items.
+
+Code checked stock, quantities and totals without a mistake, and no invented price appeared once code wrote the fact sentences.
+
+**Spec decisions (made before the runs):** for the ultralight tent, suggesting another tent is fine if the answer says plainly it's out of stock. For kayaks: no list, and no offer to order.
+
+**Why 3 / 5 stands:** every change was made by reading these same five goals; another round would tune against the test set. Next fixes, not built: a relevance gate in code (minimum rerank score) so "nothing fits" is a code decision, trip knowledge in code, and an extra-items check.
+
 ## Evaluation
 
 ### Retrieval

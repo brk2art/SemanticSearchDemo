@@ -121,26 +121,58 @@ if (!args.Contains("no-rerank"))
     Console.WriteLine("Reranking the top 10 with the chat model.");
 }
 
-// "agent": the model plans its own steps, with search, price and catalogue tools.
+// The model that makes the decisions in workflow and agent modes; "qwen" switches it.
+// Temperature 0 so runs can be compared; at most 1,000 tokens per call, so a model that starts
+// repeating itself stops; a 10-minute HTTP timeout, because slow local calls can exceed the default 100 s.
+var decisionModel = args.Contains("qwen") ? "qwen2.5:7b" : "llama3.1:8b";
+var decisionHttp = new HttpClient { BaseAddress = new Uri("http://localhost:11434/"), Timeout = TimeSpan.FromMinutes(10) };
+
+// OllamaApiClient is both a chat client and an embedding generator; typing it as IChatClient
+// tells the compiler which AsBuilder() is meant.
+IChatClient decisionBase = new OllamaApiClient(decisionHttp, decisionModel);
+IChatClient decisionChat = decisionBase
+    .AsBuilder()
+    .ConfigureOptions(o =>
+    {
+        o.Temperature = 0;
+        o.MaxOutputTokens = 1000;
+    })
+    .Build();
+
+// "workflow" / "workfloweval": plan and execute. The model makes three small decisions; code runs the steps.
+if (args.Contains("workflow") || args.Contains("workfloweval"))
+{
+    Console.WriteLine($"Decision model: {decisionModel}");
+    var workflow = new ShopWorkflow(index, new ShopTools(), decisionChat);
+
+    if (args.Contains("workfloweval"))
+    {
+        await AgentEval.RunAsync("Workflow", workflow.RunAsync);
+        return;
+    }
+
+    Console.WriteLine("Workflow ready. Ask something; leave it empty to quit.");
+    while (true)
+    {
+        Console.Write("\n> ");
+        var goal = Console.ReadLine();
+        if (string.IsNullOrWhiteSpace(goal))
+            break;
+
+        var outcome = await workflow.RunAsync(goal);
+        Console.WriteLine($"\nShop: {outcome.Answer}");
+        if (outcome.FinalList is not null)
+            Console.WriteLine($"\nShopping list (checked and totalled by code):\n{outcome.FinalList}");
+    }
+    return;
+}
+
+// "agent" / "agenteval": the model plans its own steps. Kept for comparison.
 if (args.Contains("agent") || args.Contains("agenteval"))
 {
+    Console.WriteLine($"Agent model: {decisionModel}");
     var agentShop = new ShopTools();
     var agentTools = new AgentTools(index, agentShop);
-
-    // "qwen": run the agent on another model, to see whether the model or the design is the limit.
-    var agentModel = args.Contains("qwen") ? "qwen2.5:7b" : "llama3.1:8b";
-    // Agent runs make many slow local calls, and Ollama may need to load the model first.
-    // HttpClient's default 100-second timeout is too short for that.
-    var agentHttp = new HttpClient
-    {
-        BaseAddress = new Uri("http://localhost:11434/"),
-        Timeout = TimeSpan.FromMinutes(10),
-    };
-    IChatClient agentBase = new OllamaApiClient(agentHttp, agentModel);
-
-    // Temperature 0 on every model call the agent makes, so runs can be compared.
-    var agentChat = agentBase.AsBuilder().ConfigureOptions(o => o.Temperature = 0).Build();
-    Console.WriteLine($"Agent model: {agentModel}");
 
     const string agentInstructions = """
         You are a shop assistant agent for an outdoor equipment store. Follow these steps:
@@ -159,7 +191,7 @@ if (args.Contains("agent") || args.Contains("agenteval"))
         """;
 
     AIAgent agent = new ChatClientAgent(
-        agentChat,
+        decisionChat,
         instructions: agentInstructions,
         name: "ShopAgent",
         tools:
@@ -168,13 +200,20 @@ if (args.Contains("agent") || args.Contains("agenteval"))
             AIFunctionFactory.Create(agentTools.SubmitShoppingList),
         ]);
 
-    // A session keeps the conversation, so a follow-up question can refer to the last answer.
-    var session = await agent.CreateSessionAsync();
+    // One agent run, as an Outcome, so the same evaluation can score the agent and the workflow.
+    async Task<Outcome> RunAgentAsync(string goal, CancellationToken ct)
+    {
+        agentTools.Reset();
+        var session = await agent.CreateSessionAsync();
+        var response = await agent.RunAsync(goal, session, cancellationToken: ct);
+        return new Outcome(response.Text, agentTools.Accepted, agentTools.FinalList,
+            $"searches {agentTools.Searches}, submissions {agentTools.Submissions} " +
+            $"({agentTools.Rejections} refused), blocked {agentTools.Blocked}");
+    }
 
-    // "agenteval": run the five goals and exit.
     if (args.Contains("agenteval"))
     {
-        await AgentEval.RunAsync(agent, agentTools);
+        await AgentEval.RunAsync("Agent", RunAgentAsync);
         return;
     }
 
@@ -186,13 +225,11 @@ if (args.Contains("agent") || args.Contains("agenteval"))
         if (string.IsNullOrWhiteSpace(goal))
             break;
 
-        agentTools.Reset();
-        var response = await agent.RunAsync(goal, session);
-
-        Console.WriteLine($"\nAgent: {response.Text}");
-        Console.WriteLine(agentTools.FinalList is null
+        var outcome = await RunAgentAsync(goal, default);
+        Console.WriteLine($"\nAgent: {outcome.Answer}");
+        Console.WriteLine(outcome.FinalList is null
             ? "\n(No shopping list was submitted.)"
-            : $"\nShopping list (checked and totalled by code):\n{agentTools.FinalList}");
+            : $"\nShopping list (checked and totalled by code):\n{outcome.FinalList}");
     }
     return;
 }
@@ -208,7 +245,7 @@ IChatClient answerClient = chat;
 if (args.Contains("tools") || args.Contains("tooleval"))
 {
     shopTools = new ShopTools();
-    tools = 
+    tools =
     [
         AIFunctionFactory.Create(shopTools.GetPriceAndStock),
         AIFunctionFactory.Create(shopTools.FindProducts)
@@ -234,7 +271,7 @@ if (args.Contains("tools") || args.Contains("tooleval"))
         var mcp = await McpClient.CreateAsync(transport);
         var mcpTools = await mcp.ListToolsAsync();
 
-        foreach(var t in mcpTools)
+        foreach (var t in mcpTools)
             Console.WriteLine($"MCP tool: {t.Name}");
 
         // McpClientTool is an AIFunction, so it plugs into ChatOptions.Tools like any other tool.
@@ -272,8 +309,8 @@ if (args.Contains("tools") || args.Contains("tooleval"))
         builder.Use(async (messages, options, next, ct) =>
         {
             Console.WriteLine($"\n  ==== model call: {messages.Count()} messages ====");
-            
-            foreach(var m in messages)
+
+            foreach (var m in messages)
             {
                 foreach (var c in m.Contents)
                 {

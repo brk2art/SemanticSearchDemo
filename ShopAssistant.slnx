@@ -1,4 +1,4 @@
 <Solution>
-  <Project Path="SemanticSearchDemo.csproj" />
+  <Project Path="ShopAssistant.csproj" />
   <Project Path="ShopMcpServer/ShopMcpServer.csproj" />
 </Solution>

@@ -1,4 +1,4 @@
-# SemanticSearchDemo
+# dotnet-ai-shop-assistant
 
 A minimal semantic search and question-answering app in C#. It shows the core ideas behind
 vector search and RAG, and how to measure whether they work:
@@ -254,7 +254,7 @@ Asked for the family tent's price, it called `FindProducts`: it had no product l
 not have known the code. Tools meant for clients you don't control must work without your app's
 context.
 
-Build with `dotnet build SemanticSearchDemo.slnx`, which also rebuilds the server, then run
+Build with `dotnet build ShopAssistant.slnx`, which also rebuilds the server, then run
 `dotnet run -- tools mcp`.
 
 ## Agent or workflow: who decides the next step?
@@ -490,7 +490,7 @@ answer the question as asked ("is it under 10 euros?" gets only the price).
 | `docs/*.md` | The four shop documents |
 | `uses.json` | Cached output of the enricher |
 | `ShopMcpServer/Program.cs` | MCP server: stdio transport, `ShopMcpTools` adapter over `ShopTools` |
-| `SemanticSearchDemo.slnx` | Both projects, so one build updates the server too |
+| `ShopAssistant.slnx` | Both projects, so one build updates the server too |
 
 ## Packages
 

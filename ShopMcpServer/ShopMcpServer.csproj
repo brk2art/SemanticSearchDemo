@@ -12,7 +12,7 @@
     <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
   </ItemGroup>
 
-  <!-- The same files SemanticSearchDemo uses: one copy of the business code, two hosts. -->
+  <!-- The same files ShopAssistant uses: one copy of the business code, two hosts. -->
   <ItemGroup>
     <Compile Include="..\ProductSearch\Product.cs" Link="Shared\Product.cs" />
     <Compile Include="..\ProductSearch\Catalog.cs" Link="Shared\Catalog.cs" />
